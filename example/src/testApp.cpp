@@ -11,8 +11,8 @@ using namespace ofxCv;
 void testApp::setup() 
 {
 	//settings and defaults
-	projectorWidth = 1280;
-	projectorHeight = 800;
+	projectorWidth = 1024;
+	projectorHeight = 768;
 	enableCalibration = false;
 	enableTestmode	  = true;
 
@@ -21,7 +21,10 @@ void testApp::setup()
     ofBackground(100);
 	ofSetLogLevel(OF_LOG_VERBOSE);
 	ofSetWindowTitle("Kinect Projector Calibration demo");
+    
+    int width, height;
 
+#ifdef TARGET_WIN32
 	//kinect: configure your backend
 	ofxKinectNui::InitSetting initSetting;
 	initSetting.grabVideo = true;
@@ -33,23 +36,49 @@ void testApp::setup()
 	initSetting.grabLabelCv = false;
 	initSetting.videoResolution = NUI_IMAGE_RESOLUTION_640x480;
 	initSetting.depthResolution = NUI_IMAGE_RESOLUTION_640x480;
-	kinect.init(initSetting);
-	kinect.open();
-	kinect.setAngle(-20);
-
-	//allocate some images
-	kinectCalibratedColorImage.allocate(kinect.getDepthResolutionWidth(), kinect.getDepthResolutionHeight());
-	kinectLabelImageGray.allocate(kinect.getDepthResolutionWidth(), kinect.getDepthResolutionHeight());
-	
+	camera.init(initSetting);
+	camera.open();
+	camera.setAngle(-20);
+    
+    width = camera.getDepthResolutionWidth();
+    height = camera.getDepthResolutionHeight();
+    
 	//make the wrapper (to make calibration independant of the drivers...)
 	RGBDCamCalibWrapper* kinectWrapper = new RGBDCamCalibWrapperOfxKinectNUI();
-	kinectWrapper->setup(&kinect);
+	kinectWrapper->setup(&camera);
 	kinectProjectorCalibration.setup(kinectWrapper, projectorWidth, projectorHeight);
-	
+    
 	//sets the output alinger
-	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);	
+	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);
 	//kinectProjectorOutput.load("kinectProjector.yml");
+#elif defined TARGET_OSX
+    camera.setup();
+    camera.addDepthGenerator();
+    camera.addImageGenerator();
+    camera.setUseDepthRawPixels(true);
+    camera.setRegister(true);
+    camera.setUseBackBuffer(true);
+    camera.start();
+    
+    width = 320;//camera.getWidth();
+    height = 240;//camera.getHeight();
+    
+	//make the wrapper (to make calibration independant of the drivers...)
+	RGBDCamCalibWrapperOfxOpenNi* kinectWrapper = new RGBDCamCalibWrapperOfxOpenNi();
+	kinectWrapper->setup(&camera);
+	kinectProjectorCalibration.setup(kinectWrapper, projectorWidth, projectorHeight);
+    
+	//sets the output alinger
+	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);
+	//kinectProjectorOutput.load("kinectProjector.yml");
+    kinectImageGrayRGBA.allocate(width, height);
+#endif
+    
 
+	//allocate some images
+	kinectCalibratedColorImage.allocate(width, height);
+	kinectLabelImageGray.allocate(width, height);
+	
 	//setup our second window
 	setupSecondWindow();
 	secondWindowFbo.allocate(projectorWidth, projectorHeight);
@@ -60,11 +89,22 @@ void testApp::setup()
 }
 
 void testApp::update() 
-{	
-	kinect.update();
-	kinectCalibratedColorImage.setFromPixels(kinect.getCalibratedVideoPixels());
-	kinectLabelImageGray.setFromPixels(kinect.getDepthPixels());
-	
+{
+    
+#ifdef TARGET_WIN32
+	camera.update();
+	kinectCalibratedColorImage.setFromPixels(camera.getCalibratedVideoPixels());
+	kinectLabelImageGray.setFromPixels(camera.getDepthPixels());
+#elif defined TARGET_OSX
+    kinectCalibratedColorImage.setFromPixels( camera.getImagePixels() );
+    // this is the worst
+    ofPixels & pix = camera.getDepthPixels();
+    for ( int i=0; i<pix.getWidth() * pix.getHeight(); i ++){
+        kinectLabelImageGray.getPixels()[i] = pix[i * pix.getNumChannels()];
+    }
+    kinectLabelImageGray.updateTexture();
+#endif
+    
 	//if calibration active
 	if (enableCalibration) {
 		//draw the chessboard to our second window
@@ -74,8 +114,8 @@ void testApp::update()
 		secondWindowFbo.end();
 
 		//do a very-fast check if chessboard is found
-		bool stableBoard = kinectProjectorCalibration.doFastCheck();	
-
+		bool stableBoard = kinectProjectorCalibration.doFastCheck();
+        
 		//if it is stable, add it.
 		if (stableBoard) {
 			kinectProjectorCalibration.addCurrentFrame();	
@@ -87,8 +127,8 @@ void testApp::update()
 	if (enableTestmode) {
 
 		//find our contours in the label image
-		kinectLabelImageGray.threshold(50,false);
-		contourFinder.findContours(kinectLabelImageGray, 100, 640*480, 4, false, true);
+		kinectLabelImageGray.threshold(0,false);
+		contourFinder.findContours(kinectLabelImageGray, 100, 320*240, 4, false, true);
 		
 
 
@@ -96,9 +136,12 @@ void testApp::update()
 		secondWindowFbo.begin();
 			ofClear(0);
 			ofSetColor(255);
-			ofSetLineWidth(3);
-
-			for (int i = 0; i < contourFinder.nBlobs; i++) {
+			ofSetLineWidth(1);
+        
+        ofFill();
+        for (int i = 0; i < contourFinder.nBlobs; i++) {
+            
+                ofBeginShape();
 				for (int j = 0; j < contourFinder.blobs[i].nPts - 1; j++) {
 					//we get our original points
 					ofPoint originalFrom = contourFinder.blobs[i].pts[j];
@@ -111,10 +154,19 @@ void testApp::update()
 					//todo soon method with opengl matrixes (more performant)
 
 					//for some reason it mirros, dunno why
-					projectedFrom.x = 1280-projectedFrom.x;
-					projectedTo.x = 1280-projectedTo.x;
-					ofLine(projectedFrom, projectedTo);
+                    // not on OS X for some reason?
+#ifdef TARGET_WIN32
+					projectedFrom.x = projectorWidth-projectedFrom.x;
+					projectedTo.x = projectorWidth-projectedTo.x;
+#elif defined TARGET_OSX
+					projectedFrom.x = projectedFrom.x;
+					projectedTo.x = projectedTo.x;
+#endif
+                    ofVertex(projectedFrom);
+                    ofVertex(projectedTo);
+//					ofLine(projectedFrom, projectedTo);
 				}
+                ofEndShape(true);
 			}
 		secondWindowFbo.end();
 		
@@ -140,7 +192,7 @@ void testApp::draw()
 		for (int i = 0; i < pts.size(); i++) {
 			ofSetColor(0,255,0);
 			ofFill();
-			ofCircle(pts[i].x/2.0, pts[i].y / 2.0, 5);
+			ofCircle(pts[i].x, pts[i].y, 5);
 			ofNoFill();
 		}
 		ofTranslate(0,-40);
@@ -172,11 +224,15 @@ void testApp::draw()
 }
 
 void testApp::exit() 
-{	
-	kinect.close();
+{
+#ifdef TARGET_WIN32
+	camera.close();
+#elif defined TARGET_OSX
+    camera.stop();
+#endif
 }
 
-void testApp::keyPressed (int key) 
+void testApp::keyPressed (int key)
 {
 	if (key == 'f') {
 		secondWindow.toggleFullScreen();

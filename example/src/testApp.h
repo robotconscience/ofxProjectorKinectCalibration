@@ -7,8 +7,12 @@
 #include "ofMain.h"
 #include "ofxUI.h"
 
+#ifdef TARGET_WIN32
 #include <Shlobj.h>
 #include "ofxKinectNui.h"
+#elif defined TARGET_OSX
+#include "ofxOpenNI.h"
+#endif
 
 #include "ofxKinectProjectorCalibration.h"
 #include "ofxCv.h"
@@ -35,10 +39,15 @@ class testApp : public ofBaseApp
         void mouseReleased(int x, int y, int button);
         void windowResized(int w, int h);
 
-	private:	
-		//kinect & the wrapper
-		ofxKinectNui				kinect;
+	private:
+    //kinect & the wrapper
+#ifdef TARGET_WIN32
+        ofxKinectNui				camera;
+#elif defined TARGET_OSX
+        ofxOpenNI                   camera;
+#endif
 		ofxCvColorImage				kinectCalibratedColorImage;
+        ofxCvColorImage             kinectImageGrayRGBA; // for ofxOpenNI...
 		ofxCvGrayscaleImage			kinectLabelImageGray;
 		RGBDCamCalibWrapper*		kinectWrapper;
 		

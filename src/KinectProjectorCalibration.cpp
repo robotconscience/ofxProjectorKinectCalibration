@@ -29,9 +29,9 @@ KinectProjectorCalibration::KinectProjectorCalibration() {
 	calibrated = false;
 
 	chessboardFound = false;
-	fastCheckResize = 0.5;
+	fastCheckResize = 1.0;
 	chessboardColor = 125;
-	kinectColorImage.allocate(640,480);
+	kinectColorImage.allocate(320,240);
 	stableFrom = -1;
 }
 
@@ -40,6 +40,7 @@ void	KinectProjectorCalibration::setup(RGBDCamCalibWrapper* _kinect, int _projec
 	kinect = _kinect;
 	projectorResolutionX = _projectorResolutionX;
 	projectorResolutionY = _projectorResolutionY;
+    chessboard.setProjectorResolution(projectorResolutionX, projectorResolutionY);
 	isReady = true;
 }
 
@@ -47,14 +48,15 @@ void	KinectProjectorCalibration::setup(RGBDCamCalibWrapper* _kinect, int _projec
 bool	KinectProjectorCalibration::doFastCheck(){
 	if (!isReady) return false;
 	ofxCvColorImage colorImg = kinect->getColorImageCalibrated();
-	colorImg.resize(colorImg.width*fastCheckResize,colorImg.height * fastCheckResize);
+    colorImg.updateTexture();
+//	colorImg.resize(colorImg.width*fastCheckResize,colorImg.height * fastCheckResize);
 	Mat colorImage = toCv(colorImg);
 	pointBufFastCheck.clear();
 	
 	vector<Point2f> pointBuf;
 	//setup for finding chessboards
 	cv::Size patternSize = cv::Size(chessboardBlocksX, chessboardBlocksY);
-	int flags = CV_CALIB_CB_FAST_CHECK;
+	int flags = 0;//CV_CALIB_CB_FAST_CHECK;
 	if(b_CV_CALIB_CB_ADAPTIVE_THRESH) flags += CV_CALIB_CB_ADAPTIVE_THRESH; 
 	if(b_CV_CALIB_CB_NORMALIZE_IMAGE) flags += CV_CALIB_CB_NORMALIZE_IMAGE;  
 	
@@ -67,7 +69,6 @@ bool	KinectProjectorCalibration::doFastCheck(){
 		for (int i = 0; i < pointBuf.size(); i++) {
 			pointBufFastCheck.push_back((1.0/fastCheckResize) * toOf(pointBuf[i]));
 		}
-		//cout << "Stable: " << (ofGetElapsedTimeMillis() - stableFrom) << endl;
 		return (ofGetElapsedTimeMillis() - stableFrom > 2000) ;
 	} else {
 		stableFrom = -1;
@@ -120,7 +121,7 @@ void	KinectProjectorCalibration::addCurrentFrame(){
 			//kinect & world cooords
 			ofVec2f kinectCoords = ofVec2f(pointBuf[i].x, pointBuf[i].y);
 			ofVec3f worldCoords = kinect->getWorldFromRgbCalibrated(kinectCoords);
-			if (worldCoords.z <= 0.01) { 
+            if (worldCoords.z <= 0.01) {
 				valid = false;
 				break;
 			}
@@ -140,8 +141,10 @@ void	KinectProjectorCalibration::addCurrentFrame(){
 
 			//update our calibration
 			calibrate();
-		}
-	} 
+		} else {
+            cout <<"not valid?"<<endl;
+        }
+	}
 }
 
 
