@@ -7,14 +7,23 @@
 #include "ofMain.h"
 #include "ofxUI.h"
 
+#define USE_OPENNI2
+
+#include "ofxKinectProjectorCalibration.h"
+
 #ifdef TARGET_WIN32
 #include <Shlobj.h>
 #include "ofxKinectNui.h"
 #elif defined TARGET_OSX
+#ifdef USE_OPENNI2
+#include "ofxOpenNI2Grabber.h"
+#include "RGBDCamCalibWrapperOfxOpenNi2.h"
+#else
 #include "ofxOpenNI.h"
+#include "RGBDCamCalibWrapperOfxOpenNi.h"
+#endif
 #endif
 
-#include "ofxKinectProjectorCalibration.h"
 #include "ofxCv.h"
 #include "ofxOpenCv.h"
 
@@ -44,7 +53,11 @@ class testApp : public ofBaseApp
 #ifdef TARGET_WIN32
         ofxKinectNui				camera;
 #elif defined TARGET_OSX
+#ifdef USE_OPENNI2
+        ofxOpenNI2Grabber           camera;
+#else
         ofxOpenNI                   camera;
+#endif
 #endif
 		ofxCvColorImage				kinectCalibratedColorImage;
         ofxCvColorImage             kinectImageGrayRGBA; // for ofxOpenNI...
@@ -54,7 +67,9 @@ class testApp : public ofBaseApp
 		//calibration
 		KinectProjectorCalibration	kinectProjectorCalibration;
 		bool						enableCalibration;
-		ofxCvContourFinder			contourFinder;
+    
+        ContourFinder               contourFinder;
+        float                         threshold;
 
 		//output
 		KinectProjectorOutput		kinectProjectorOutput;

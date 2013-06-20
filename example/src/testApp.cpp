@@ -19,7 +19,6 @@ void testApp::setup()
 	//OF basics
     ofSetFrameRate(60);
     ofBackground(100);
-	ofSetLogLevel(OF_LOG_VERBOSE);
 	ofSetWindowTitle("Kinect Projector Calibration demo");
     
     int width, height;
@@ -50,8 +49,29 @@ void testApp::setup()
     
 	//sets the output alinger
 	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);
-	//kinectProjectorOutput.load("kinectProjector.yml");
+	kinectProjectorOutput.load("kinectProjector.yml");
 #elif defined TARGET_OSX
+#ifdef USE_OPENNI2
+    ofxOpenNI2GrabberSettings settings;
+    camera.setup(settings);
+    camera.depthSource.doDoubleBuffering = true;
+    camera.rgbSource.doDoubleBuffering = true;
+    camera.startThread();
+    
+    width = settings.width;
+    height = settings.height;
+    
+    //make the wrapper (to make calibration independant of the drivers...)
+	RGBDCamCalibWrapperOfxOpenNi2* kinectWrapper = new RGBDCamCalibWrapperOfxOpenNi2();
+	kinectWrapper->setup(&camera);
+	kinectProjectorCalibration.setup(kinectWrapper, projectorWidth, projectorHeight);
+    
+	//sets the output alinger
+	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);
+	kinectProjectorOutput.load("kinectProjector.yml");
+    kinectImageGrayRGBA.allocate(width, height);
+    
+#else
     camera.setup();
     camera.addDepthGenerator();
     camera.addImageGenerator();
@@ -70,8 +90,9 @@ void testApp::setup()
     
 	//sets the output alinger
 	kinectProjectorOutput.setup(kinectWrapper, projectorWidth, projectorHeight);
-	//kinectProjectorOutput.load("kinectProjector.yml");
+	kinectProjectorOutput.load("kinectProjector.yml");
     kinectImageGrayRGBA.allocate(width, height);
+#endif
 #endif
     
 
@@ -84,8 +105,14 @@ void testApp::setup()
 	secondWindowFbo.allocate(projectorWidth, projectorHeight);
 	secondWindow.setFbo(&secondWindowFbo);
 	
+    threshold = 50;
+    
 	//setup the gui
 	setupGui();
+    
+    // contourz
+	contourFinder.setMinAreaRadius(10);
+	contourFinder.setMaxAreaRadius(200);
 }
 
 void testApp::update() 
@@ -95,7 +122,19 @@ void testApp::update()
 	camera.update();
 	kinectCalibratedColorImage.setFromPixels(camera.getCalibratedVideoPixels());
 	kinectLabelImageGray.setFromPixels(camera.getDepthPixels());
+    
 #elif defined TARGET_OSX
+#ifdef USE_OPENNI2
+    
+	kinectCalibratedColorImage.setFromPixels(camera.getRGBPixels());
+    
+    // this is the worst
+    ofPixels & pix = camera.getDepthPixels();
+    for ( int i=0; i<pix.getWidth() * pix.getHeight(); i ++){
+        kinectLabelImageGray.getPixels()[i] = pix[i * pix.getNumChannels()] == 0 ? 0 : 255.0f - pix[i * pix.getNumChannels()];
+    }
+    kinectLabelImageGray.updateTexture();
+#else
     kinectCalibratedColorImage.setFromPixels( camera.getImagePixels() );
     // this is the worst
     ofPixels & pix = camera.getDepthPixels();
@@ -103,6 +142,7 @@ void testApp::update()
         kinectLabelImageGray.getPixels()[i] = pix[i * pix.getNumChannels()];
     }
     kinectLabelImageGray.updateTexture();
+#endif
 #endif
     
 	//if calibration active
@@ -124,12 +164,14 @@ void testApp::update()
 
 	//if the test mode is activated, the settings are loaded automatiically (see gui function)
 	// kinectProjectorOutput.load("kinectProjector.yml");
+    
+    //find our contours in the label image
+    kinectLabelImageGray.threshold(threshold,false);
 	if (enableTestmode) {
 
-		//find our contours in the label image
-		kinectLabelImageGray.threshold(0,false);
-		contourFinder.findContours(kinectLabelImageGray, 100, 320*240, 4, false, true);
-		
+        //		contourFinder.findContours(kinectLabelImageGray, 200, 640*480, 4, false, true);
+        contourFinder.setThreshold(threshold);
+		contourFinder.findContours(kinectLabelImageGray);
 
 
 		//draw the calibrated contours to our second window
@@ -139,41 +181,47 @@ void testApp::update()
 			ofSetLineWidth(1);
         
         ofFill();
-        for (int i = 0; i < contourFinder.nBlobs; i++) {
-            
+//        kinectProjectorOutput.loadCalibratedView();
+//        contourFinder.draw();
+        for (int i = 0; i < contourFinder.getPolylines().size(); i++) {
+        
                 ofBeginShape();
-				for (int j = 0; j < contourFinder.blobs[i].nPts - 1; j++) {
-					//we get our original points
-					ofPoint originalFrom = contourFinder.blobs[i].pts[j];
-					ofPoint originalTo = contourFinder.blobs[i].pts[j+1];
-					
-					//we project from our depth xy to projector space
+				for (int j = 0; j < contourFinder.getPolylines()[i].size()-1; j++) {
+//					//we get our original points
+					ofPoint originalFrom = contourFinder.getPolylines()[i][j];
+//					ofPoint originalTo = contourFinder.getPolylines()[i][j+1];
+//					
+//					//we project from our depth xy to projector space
 					ofPoint projectedFrom = kinectProjectorOutput.projectFromDepthXY(originalFrom);
-					ofPoint projectedTo =   kinectProjectorOutput.projectFromDepthXY(originalTo);
-					
-					//todo soon method with opengl matrixes (more performant)
-
-					//for some reason it mirros, dunno why
-                    // not on OS X for some reason?
+////					ofPoint projectedTo =   kinectProjectorOutput.projectFromDepthXY(originalTo);
+//					
+//					//todo soon method with opengl matrixes (more performant)
+//
+//					//for some reason it mirros, dunno why
+//                    // not on OS X for some reason?
 #ifdef TARGET_WIN32
 					projectedFrom.x = projectorWidth-projectedFrom.x;
-					projectedTo.x = projectorWidth-projectedTo.x;
-#elif defined TARGET_OSX
-					projectedFrom.x = projectedFrom.x;
-					projectedTo.x = projectedTo.x;
+//					projectedTo.x = projectorWidth-projectedTo.x;
+#elif defined USE_OPENNI2
+					projectedFrom.x = projectorWidth-projectedFrom.x;
+//					projectedTo.x = projectorWidth-projectedTo.x;
 #endif
+////                    ofVertex(projectedFrom);
+////                    ofSetColor(ofRandom(255), ofRandom(255), ofRandom(255));
                     ofVertex(projectedFrom);
-                    ofVertex(projectedTo);
-//					ofLine(projectedFrom, projectedTo);
+//
+////					ofLine(projectedFrom, projectedTo);
 				}
                 ofEndShape(true);
 			}
+        
+//        kinectProjectorOutput.unloadCalibratedView();
 		secondWindowFbo.end();
 		
 	}
 
 	//update the gui labels with the result of our calibraition
-	guiUpdateLabels() ;  
+	guiUpdateLabels();
 }
 
 void testApp::draw() 
@@ -192,7 +240,7 @@ void testApp::draw()
 		for (int i = 0; i < pts.size(); i++) {
 			ofSetColor(0,255,0);
 			ofFill();
-			ofCircle(pts[i].x, pts[i].y, 5);
+			ofCircle(pts[i].x / 2.0f, pts[i].y / 2.0f, 5);
 			ofNoFill();
 		}
 		ofTranslate(0,-40);
@@ -208,11 +256,17 @@ void testApp::draw()
 
 		ofDrawBitmapString("Reprojected points",320+20,20+240+20+40);
 		kinectProjectorCalibration.drawReprojectedPointsDebug(320+20,20+240+40+40,320,240);
+        
+		kinectLabelImageGray.draw(320+20,20+240+40+40+240,320,240);
 	}	
 	if (enableTestmode) {
 		ofDrawBitmapString("Grayscale Image",0,20+240+20+40);
 		kinectLabelImageGray.draw(0,20+240+40+40,320,240);
-		
+        ofPushMatrix();
+        ofTranslate(0,20+240+40+40);
+        ofScale(.5,.5);
+        contourFinder.draw();
+		ofPopMatrix();
 		ofDrawBitmapString("Contours",320+20,20+240+20+40);
 	}
 
@@ -228,7 +282,12 @@ void testApp::exit()
 #ifdef TARGET_WIN32
 	camera.close();
 #elif defined TARGET_OSX
+#ifdef USE_OPENNI2
+    camera.stopThread();
+    camera.close();
+#else
     camera.stop();
+#endif
 #endif
 }
 
@@ -236,7 +295,9 @@ void testApp::keyPressed (int key)
 {
 	if (key == 'f') {
 		secondWindow.toggleFullScreen();
-	}
+	} else if ( key == 's' ){
+        kinectProjectorCalibration.save("kinectProjector.yml", false);
+    }
 }
 
 void testApp::mousePressed(int x, int y, int button)
@@ -278,10 +339,7 @@ void testApp::setupGui() {
 	gui->addWidgetDown(new ofxUILabel("sdf", "   and can be seen by the kinect", OFX_UI_FONT_SMALL));
 	gui->addWidgetDown(new ofxUILabel("sdf", "   Adjust size slider if needed", OFX_UI_FONT_SMALL));
 	gui->addWidgetDown(new ofxUILabel("sdf", "5) Keep still for 2 seconds to make capture", OFX_UI_FONT_SMALL));
-	gui->addWidgetDown(new ofxUILabel("sdf", "6) Make 15 captures, then clean the highest errors", OFX_UI_FONT_SMALL));
 
-	
-	gui->addWidgetDown(new ofxUILabel(" ", OFX_UI_FONT_LARGE)); 
 	gui->addWidgetDown(new ofxUILabel("Chessboard settings", OFX_UI_FONT_LARGE)); 
     gui->addSpacer(length-xInit, 2);
 	gui->addWidgetDown(new ofxUIBiLabelSlider(length,0,1,&kinectProjectorCalibration.chessboardSize,"boardsize","Small","Large"));
@@ -299,8 +357,8 @@ void testApp::setupGui() {
 	gui->addWidgetDown(new ofxUIToggle("CV_CALIB_FIX_K2",&kinectProjectorCalibration.b_CV_CALIB_FIX_K2, dim, dim));
 	gui->addWidgetDown(new ofxUIToggle("CV_CALIB_FIX_K3",&kinectProjectorCalibration.b_CV_CALIB_FIX_K3, dim, dim));
 	gui->addWidgetDown(new ofxUIToggle("CV_CALIB_RATIONAL_MODEL",&kinectProjectorCalibration.b_CV_CALIB_RATIONAL_MODEL, dim, dim));
+	gui->addWidgetDown(new ofxUISlider(length,20,0.0,255.0f,&threshold,"CV Threshold"));
  
-	gui->addWidgetDown(new ofxUILabel(" ", OFX_UI_FONT_LARGE)); 
 	gui->addWidgetDown(new ofxUILabel("Calibration", OFX_UI_FONT_LARGE));
     gui->addSpacer(length-xInit, 2);
 	gui->addWidgetDown(new ofxUIToggle("Activate calibration mode", &enableCalibration, dim, dim));
@@ -310,7 +368,6 @@ void testApp::setupGui() {
 	gui->addWidgetDown(new ofxUILabel("errorLabel", "Avg Reprojection error: 0.0", OFX_UI_FONT_SMALL));	
 	gui->addWidgetDown(new ofxUILabel("capturesLabel", "Number of captures: 0", OFX_UI_FONT_SMALL));
 	
-	gui->addWidgetDown(new ofxUILabel(" ", OFX_UI_FONT_LARGE)); 
 	gui->addWidgetDown(new ofxUILabel("Test", OFX_UI_FONT_LARGE));
     gui->addSpacer(length-xInit, 2);
 	gui->addWidgetDown(new ofxUIToggle("Activate test mode", &enableTestmode, dim, dim));
@@ -336,7 +393,7 @@ void testApp::guiEvent(ofxUIEventArgs &e)
 	int kind = e.widget->getKind(); 
 	if (name == "Clean dataset (remove > 2 rpr error)") { 
 		ofxUIButton* b = (ofxUIButton*)e.widget;
-		if(b->getValue()) kinectProjectorCalibration.clean();
+		if(b->getValue()) kinectProjectorCalibration.clean( 5.0f );
 	
 	} else if (name == "Activate test mode") {
 		ofxUIButton* b = (ofxUIButton*)e.widget;

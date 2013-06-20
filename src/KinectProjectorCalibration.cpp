@@ -31,7 +31,7 @@ KinectProjectorCalibration::KinectProjectorCalibration() {
 	chessboardFound = false;
 	fastCheckResize = 1.0;
 	chessboardColor = 125;
-	kinectColorImage.allocate(320,240);
+	kinectColorImage.allocate(640,480);
 	stableFrom = -1;
 }
 
@@ -55,7 +55,7 @@ bool	KinectProjectorCalibration::doFastCheck(){
 	
 	vector<Point2f> pointBuf;
 	//setup for finding chessboards
-	cv::Size patternSize = cv::Size(chessboardBlocksX, chessboardBlocksY);
+	cv::Size patternSize = cv::Size( chessboardBlocksX, chessboardBlocksY);
 	int flags = 0;//CV_CALIB_CB_FAST_CHECK;
 	if(b_CV_CALIB_CB_ADAPTIVE_THRESH) flags += CV_CALIB_CB_ADAPTIVE_THRESH; 
 	if(b_CV_CALIB_CB_NORMALIZE_IMAGE) flags += CV_CALIB_CB_NORMALIZE_IMAGE;  
@@ -121,6 +121,7 @@ void	KinectProjectorCalibration::addCurrentFrame(){
 			//kinect & world cooords
 			ofVec2f kinectCoords = ofVec2f(pointBuf[i].x, pointBuf[i].y);
 			ofVec3f worldCoords = kinect->getWorldFromRgbCalibrated(kinectCoords);
+//            cout << worldCoords << endl;
             if (worldCoords.z <= 0.01) {
 				valid = false;
 				break;
@@ -313,7 +314,7 @@ void	KinectProjectorCalibration::drawChessboardDebug(float x, float y, float wid
 	if (!isReady) return;
 
 	//set the chessboard
-	chessboard.setPatternBlocks(chessboardBlocksX, chessboardBlocksY);
+	chessboard.setPatternBlocks(chessboardBlocksY, chessboardBlocksX);
 	chessboard.setPatternSize(chessboardSize);
 	chessboard.setProjectorResolution(projectorResolutionX, projectorResolutionY);
 	
